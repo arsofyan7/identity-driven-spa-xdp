@@ -9,6 +9,20 @@
 # --- 1. Konfigurasi & Variabel ---
 VM1_IP=${1:-"192.168.1.10"} # IP VM1 (Generator), override via arg $1
 VM1_USER=${2:-"root"}       # User VM1, override via arg $2
+SSH_KEY=${3:-""}            # Opsional: Path ke SSH Identity File (e.g. /home/user/.ssh/id_ed25519)
+
+# Jika SSH_KEY tidak diberikan, coba detect jika kita jalan via sudo
+if [[ -z "$SSH_KEY" && -n "$SUDO_USER" ]]; then
+    # Default ke key standar user yang manggil sudo
+    SSH_KEY="/home/$SUDO_USER/.ssh/id_ed25519"
+fi
+
+SSH_OPTS="-o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+if [[ -f "$SSH_KEY" ]]; then
+    SSH_OPTS="$SSH_OPTS -i $SSH_KEY"
+    echo "[*] Using SSH Identity: $SSH_KEY"
+fi
+
 IFACE="eth0" # Sesuaikan dengan interface VM2 lu
 TARGET_PORT=1234
 RECEIVER_PATH="vm2_receiver/phase0_legacy/receiver.py"
@@ -87,7 +101,7 @@ iptables -P INPUT ACCEPT
 start_tcpdump "p0_sc1_no_firewall.pcap"
 
 echo "[*] Triggering Generator (1000 packets @ 50 PPS)..."
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
+ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
 stop_tcpdump
 sleep 2
 
@@ -109,7 +123,7 @@ iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 start_tcpdump "p0_sc2_static_drop.pcap"
 
 echo "[*] Triggering Generator (1000 packets @ 50 PPS)..."
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
+ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
 stop_tcpdump
 sleep 2
 
@@ -135,19 +149,19 @@ PIDSTAT_PID=$!
 
 echo "[*] Running Sequence 1 (Low Load: 100 packets @ 1 PPS)..."
 start_tcpdump "p0_sc3_spa_low.pcap"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 100 --rate 1"
+ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 100 --rate 1"
 stop_tcpdump
 sleep 2
 
 echo "[*] Running Sequence 2 (Sustained Load: 1000 packets @ 50 PPS)..."
 start_tcpdump "p0_sc3_spa_sustained.pcap"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
+ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
 stop_tcpdump
 sleep 2
 
 echo "[*] Running Sequence 3 (Stress Test: 5000 packets @ Max Rate)..."
 start_tcpdump "p0_sc3_spa_stress.pcap"
-ssh -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
+ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
 stop_tcpdump
 echo "----------------------------------------------------------------"
 
