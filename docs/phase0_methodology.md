@@ -26,7 +26,7 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 
 1. **On VM2 (Receiver):** Start the legacy receiver manually.
    ```bash
-   python3 vm2_receiver/phase0_legacy/receiver.py --secret "your-shared-secret" --ttl <xx in sec>
+   sudo python3 vm2_receiver/phase0_legacy/receiver.py --secret "your-shared-secret" --ttl <xx in sec>
    ```
 2. **On VM1 (Generator):** Send a single authorized SPA packet.
    ```bash
