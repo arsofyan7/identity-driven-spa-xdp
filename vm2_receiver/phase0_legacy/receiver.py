@@ -80,13 +80,20 @@ def main():
     
     print(f"Listening for SPA packets on UDP {args.port}...")
     
-    # This line continuously listens for incoming datagrams
-    # Rationale: Polling loop typical of userspace daemons.
-    while True:
-        # We expect 4 bytes for ID, 8 for timestamp, 32 for HMAC = 44 bytes total.
-        data, addr = sock.recvfrom(1024)
-        if len(data) == 44:
-            verify_and_process(data, addr, args.secret)
+    try:
+        # This line continuously listens for incoming datagrams
+        # Rationale: Polling loop typical of userspace daemons.
+        while True:
+            # We expect 4 bytes for ID, 8 for timestamp, 32 for HMAC = 44 bytes total.
+            data, addr = sock.recvfrom(1024)
+            if len(data) == 44:
+                verify_and_process(data, addr, args.secret)
+    except KeyboardInterrupt:
+        print("\n[!] GhostPEP Receiver stopped by user.")
+    finally:
+        print("[*] Cleaning up resources and closing socket...")
+        sock.close()
+        # Opsional: tambahin fungsi buat flush iptables di sini biar bener-bener bersih
 
 if __name__ == "__main__":
     main()
