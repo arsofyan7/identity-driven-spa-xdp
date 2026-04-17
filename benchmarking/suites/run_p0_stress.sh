@@ -6,7 +6,7 @@
 # Description: Automated stress test for Legacy Userspace SPA (Iptables)
 # ==============================================================================
 
-# --- 1. Konfigurasi & Variabel ---
+## --- 1. Konfigurasi & Variabel ---
 VM1_IP=${1:-"192.168.1.10"} # IP VM1 (Generator), override via arg $1
 VM1_USER=${2:-"root"}       # User VM1, override via arg $2
 SSH_KEY=${3:-""}            # Opsional: Path ke SSH Identity File (e.g. /home/user/.ssh/id_ed25519)
@@ -23,7 +23,24 @@ if [[ -f "$SSH_KEY" ]]; then
     echo "[*] Using SSH Identity: $SSH_KEY"
 fi
 
-IFACE="eth0" # Sesuaikan dengan interface VM2 lu
+# Pre-flight: Check Dependencies
+for cmd in tcpdump pidstat; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "[-] Error: '$cmd' not found. Please install the required tools:"
+        echo "    sudo apt update && sudo apt install -y tcpdump sysstat"
+        exit 1
+    fi
+done
+
+# Dynamic Interface Detection: Use path to VM1
+IFACE=$(ip route get "$VM1_IP" | awk '{print $5;exit}')
+if [[ -z "$IFACE" ]]; then
+    IFACE="eth0"
+    echo "[!] Warning: Could not detect interface for $VM1_IP. Falling back to $IFACE."
+else
+    echo "[*] Detected interface for communication with $VM1_IP: $IFACE"
+fi
+
 TARGET_PORT=1234
 RECEIVER_PATH="vm2_receiver/phase0_legacy/receiver.py"
 LOG_DIR="results/raw_logs"
@@ -74,7 +91,8 @@ GENERATOR_CMD="source \$HOME/.cargo/env && cd identity-driven-spa-xdp/vm1_genera
 # Helper to start tcpdump
 start_tcpdump() {
     local pcap_name=$1
-    tcpdump -i $IFACE udp port $TARGET_PORT -tt -v -w "$LOG_DIR/$pcap_name" 2> /dev/null &
+    # Removed 2> /dev/null to allow error visibility during startup
+    tcpdump -i "$IFACE" udp port $TARGET_PORT -tt -v -w "$LOG_DIR/$pcap_name" &
     TCPDUMP_PID=$!
     sleep 1 # Give tcpdump time to bind
 }
@@ -144,8 +162,10 @@ python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$L
 RECEIVER_PID=$!
 sleep 2
 
-pidstat -p $RECEIVER_PID -u -r 1 > "$CPU_LOG" &
-PIDSTAT_PID=$!
+if [[ -n "$RECEIVER_PID" ]]; then
+    pidstat -p $RECEIVER_PID -u -r 1 > "$CPU_LOG" &
+    PIDSTAT_PID=$!
+fi
 
 echo "[*] Running Sequence 1 (Low Load: 100 packets @ 1 PPS)..."
 start_tcpdump "p0_sc3_spa_low.pcap"
@@ -174,10 +194,11 @@ read -p "[PAUSE] Press [ENTER] when you are finished with the Manual Stress Test
 echo "----------------------------------------------------------------"
 
 # --- 7. Final Consolidation ---
+echo "[*] Consolidating logs into $RAW_LOG..."
 sleep 2
-cat "$CPU_LOG" >> "$RAW_LOG"
+cat "$CPU_LOG" >> "$RAW_LOG" 2>/dev/null
 echo -e "\n--- APPLICATION LOGS ---" >> "$RAW_LOG"
-cat "$TEMP_APP_LOG" >> "$RAW_LOG"
+cat "$TEMP_APP_LOG" >> "$RAW_LOG" 2>/dev/null
 
 rm "$TEMP_APP_LOG" "$CPU_LOG" 2>/dev/null
 
