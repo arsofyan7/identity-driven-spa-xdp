@@ -69,7 +69,7 @@ echo "[+] GhostPEP Phase 0 Benchmark Started."
 echo "--- SYSTEM METRICS ---" > "$RAW_LOG"
 
 VM2_IP=$(hostname -I | awk '{print $1}')
-GENERATOR_CMD="cd identity-driven-spa-xdp/vm1_generator && cargo run --release -- --target $VM2_IP --port $TARGET_PORT --identity 1001 --secret 'my-secret'"
+GENERATOR_CMD="source \$HOME/.cargo/env && cd identity-driven-spa-xdp/vm1_generator && cargo run --release -- --target $VM2_IP --port $TARGET_PORT --identity 1001 --secret 'my-secret'"
 
 # Helper to start tcpdump
 start_tcpdump() {
