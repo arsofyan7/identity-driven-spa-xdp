@@ -163,6 +163,14 @@ echo "[*] Running Sequence 3 (Stress Test: 5000 packets @ Max Rate)..."
 start_tcpdump "p0_sc3_spa_stress.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
 stop_tcpdump
+
+echo "----------------------------------------------------------------"
+echo "[!!!] AUTOMATED SEQUENCES COMPLETE [!!!]"
+echo "[*] The SPA Receiver is still running (PID: $RECEIVER_PID)."
+echo "[*] You can now perform the manual DDoS Simulation (hping3) from VM1."
+echo "[*] Monitoring CPU usage via pidstat in background..."
+echo "----------------------------------------------------------------"
+read -p "[PAUSE] Press [ENTER] when you are finished with the Manual Stress Test to stop and clean up..."
 echo "----------------------------------------------------------------"
 
 # --- 7. Final Consolidation ---

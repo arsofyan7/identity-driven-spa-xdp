@@ -63,13 +63,16 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 ### Scenario 3: Resilience & Stress Test (DDoS Simulation)
 *Evaluate system behavior and resource exhaustion under a high-volume unauthorized traffic flood.*
 
-1. **On VM2 (Receiver):** Start the `run_p0_stress.sh` script.
-2. **On VM1 (Generator):** Bombard the SPA listener port using `hping3` to simulate a DDoS attack.
+1. **On VM2 (Receiver):** Run the `run_p0_stress.sh` script normally. Wait for the script to finish its automated sequences and show the `[PAUSE]` prompt.
+2. **On VM1 (Generator):** While VM2 is paused, bombard the SPA listener port using `hping3` to simulate a DDoS attack.
    ```bash
+   # Flood VM2 on the SPA port (default 1234)
    sudo hping3 --flood --udp -p 1234 <VM2_IP>
    ```
-3. **Observation:** Open a second terminal on VM2 and run `htop`. Monitor the **%CPU** of the Python process and the **%si** (Software Interrupts) overhead.
-4. **Finalization:** Stop `hping3` after 30 seconds and press **[ENTER]** on VM2 to save the results.
+3. **Observation on VM2:** Open a second terminal on VM2 and run `htop`. Monitor:
+   - **%CPU** of the Python process (expected to spike as it handles validation).
+   - **%si** (Software Interrupts) in the CPU summary.
+4. **Finalization:** Stop `hping3` (Ctrl+C) after ~30 seconds and then press **[ENTER]** on the VM2 terminal where the script is paused to save the final results and clean up.
 
 ---
 
