@@ -44,6 +44,13 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 *Measure the authorization latency, baseline hardware throughput, and system stability under 3 distinct networking firewall scenarios (No Firewall, Static Drop, SPA).*
 
 1. **On VM2 (Receiver):** Execute the automated benchmarking suite. The script automatically detects your SSH key if running via `sudo`, but you can provide it explicitly as the 3rd argument.
+    
+   # Simpan traffic UDP port 8080 ke file hasil.pcap
+   run tcpdump in other terminal
+   ```bash
+   sudo tcpdump -i enp0s8 udp port 8080 -w hasil.pcap
+   ```
+   
    ```bash
    chmod +x benchmarking/suites/run_p0_stress.sh
    sudo ./benchmarking/suites/run_p0_stress.sh <VM1_IP> <VM1_USER> [OPTIONAL_SSH_KEY_PATH]
