@@ -12,16 +12,11 @@ import argparse
 import os
 
 def remove_iptables_rule(src_ip):
-    # This line executes a sleep before removing the rule
-    # Rationale: NIST Zero Trust requirement for session-based access - access is granted temporarily.
-    time.sleep(30)
-    
     # This line executes the command to remove the iptables rule
     # Rationale: Clean up the firewall rule to revoke access after the session timer expires.
     subprocess.run(["iptables", "-D", "INPUT", "-s", src_ip, "-j", "ACCEPT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    print(f"Removed iptables rule for {src_ip}")
 
-def verify_and_process(data, addr, secret_key, log_file=None):
+def verify_and_process(data, addr, secret_key, ttl, log_file=None):
     # This line records the start time
     # Rationale: Measure processing time from recv() to subprocess.run() completion in microseconds.
     start_time = time.perf_counter_ns()
@@ -62,9 +57,13 @@ def verify_and_process(data, addr, secret_key, log_file=None):
             with open(log_file, "a") as f:
                 f.write(f"{time.time()},{src_ip},{identity_id},{processing_time_us:.2f}\n")
         
-        # This line spawns a delayed background thread for cleanup
-        # Rationale: Implements the "Cleanup Timer" without blocking the receiver loop.
-        threading.Thread(target=remove_iptables_rule, args=(src_ip,), daemon=True).start()
+        # TTL / Authorization Window
+        # Rationale: Hold the "door" open for manual verification or network access before cleanup.
+        print(f"[+] SPA Valid. Opening access for {src_ip} for {ttl} seconds....")
+        time.sleep(ttl)
+        
+        remove_iptables_rule(src_ip)
+        print(f"[-] TTL Expired. Removing access for {src_ip}.")
     else:
         # This line drops invalid packets silently
         # Rationale: The essence of SPA is stealth; we do not respond to unauthorized access attempts.
@@ -77,6 +76,7 @@ def main():
     parser.add_argument("--port", type=int, default=8080, help="UDP Port to listen on")
     parser.add_argument("--secret", type=str, required=True, help="Shared secret for HMAC")
     parser.add_argument("--log-file", type=str, default="results/raw_logs/p0_events.csv", help="Path to CSV log file")
+    parser.add_argument("--ttl", type=int, default=10, help="Authorization Window (seconds)")
     args = parser.parse_args()
 
     # Initialize log file
@@ -101,12 +101,13 @@ def main():
             # We expect 4 bytes for ID, 8 for timestamp, 32 for HMAC = 44 bytes total.
             data, addr = sock.recvfrom(1024)
             if len(data) == 44:
-                verify_and_process(data, addr, args.secret, args.log_file)
+                verify_and_process(data, addr, args.secret, args.ttl, args.log_file)
     except KeyboardInterrupt:
         print("\n[!] GhostPEP Receiver stopped by user.")
     finally:
         print("[*] Cleaning up resources and closing socket...")
         sock.close()
+
         # Opsional: tambahin fungsi buat flush iptables di sini biar bener-bener bersih
 
 if __name__ == "__main__":
