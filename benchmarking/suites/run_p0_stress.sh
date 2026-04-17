@@ -98,25 +98,6 @@ echo "--- SYSTEM METRICS ---" > "$RAW_LOG"
 VM2_IP=$(hostname -I | awk '{print $1}')
 GENERATOR_CMD="source \$HOME/.cargo/env && cd identity-driven-spa-xdp/vm1_generator && cargo run --release -- --target $VM2_IP --port $TARGET_PORT --identity 1001 --secret 'my-secret'"
 
-# ==============================================================================
-# GLOBAL RECEIVER INITIALIZATION
-# ==============================================================================
-# Start Legacy Receiver in background at the beginning so the PID is available
-# for all scenarios, ensuring identical test environments.
-echo "[*] Launching Legacy Receiver in background..."
-python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$LOG_DIR/p0_events.csv" >> "$TEMP_APP_LOG" 2>&1 &
-RECEIVER_PID=$!
-sleep 2
-
-take_pidstat_snapshot() {
-    if [[ -n "$RECEIVER_PID" ]]; then
-        # Run pidstat for 1 second in the background so it captures CPU/MEM 
-        # while the actual traffic generator is running.
-        # This prevents the log from being spammed continuously and produces exactly 2 blocks.
-        pidstat -p $RECEIVER_PID -u -r 1 1 >> "$CPU_LOG" &
-    fi
-}
-
 # Helper to start tcpdump
 start_tcpdump() {
     local pcap_name=$1
@@ -159,8 +140,8 @@ monitor_system() {
     rx_tx=$(grep "$IFACE" /proc/net/dev 2>/dev/null | awk -F: '{print $2}' | awk '{print $1, $9}')
     prev_rx=$(echo $rx_tx | awk '{print $1}')
     prev_tx=$(echo $rx_tx | awk '{print $2}')
-    [[ -z "$rx" ]] && prev_rx=0
-    [[ -z "$tx" ]] && prev_tx=0
+    [[ -z "$prev_rx" ]] && prev_rx=0
+    [[ -z "$prev_tx" ]] && prev_tx=0
 
     while true; do
         sleep 1
@@ -204,7 +185,6 @@ SYS_MONITOR_PID=$!
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 1: No Firewall"
 log_marker "START_SCENARIO_1: No Firewall"
-take_pidstat_snapshot
 
 # Clean iptables, accept all
 iptables -F
@@ -224,7 +204,6 @@ sleep 2
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 2: Static Firewall (Drop All)"
 log_marker "START_SCENARIO_2: Static Firewall (Drop All)"
-take_pidstat_snapshot
 
 # Set strict drop
 iptables -F
@@ -247,14 +226,23 @@ sleep 2
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 3: Phase 0 SPA (Legacy Userspace)"
 log_marker "START_SCENARIO_3: Phase 0 SPA (Legacy Userspace)"
-take_pidstat_snapshot
 
 # Allow SPA port manually
 iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT
 
+# Start Legacy Receiver
+echo "[*] Launching Legacy Receiver in background..."
+python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$LOG_DIR/p0_events.csv" >> "$TEMP_APP_LOG" 2>&1 &
+RECEIVER_PID=$!
+sleep 2
+
+if [[ -n "$RECEIVER_PID" ]]; then
+    pidstat -p $RECEIVER_PID -u -r 1 >> "$CPU_LOG" &
+    PIDSTAT_PID=$!
+fi
+
 echo "[*] Running Sequence 1 (Low Load: 100 packets @ 1 PPS)..."
 log_marker "SCENARIO 3 - SEQUENCE 1: Low Load (1 PPS)"
-take_pidstat_snapshot
 start_tcpdump "p0_sc3_spa_low.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 100 --rate 1"
 stop_tcpdump
@@ -262,7 +250,6 @@ sleep 2
 
 echo "[*] Running Sequence 2 (Sustained Load: 1000 packets @ 50 PPS)..."
 log_marker "SCENARIO 3 - SEQUENCE 2: Sustained Load (50 PPS)"
-take_pidstat_snapshot
 start_tcpdump "p0_sc3_spa_sustained.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
 stop_tcpdump
@@ -270,7 +257,6 @@ sleep 2
 
 echo "[*] Running Sequence 3 (Stress Test: 5000 packets @ Max Rate)..."
 log_marker "SCENARIO 3 - SEQUENCE 3: Stress Test (Max Rate)"
-take_pidstat_snapshot
 start_tcpdump "p0_sc3_spa_stress.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
 stop_tcpdump
@@ -282,7 +268,6 @@ echo "[*] You can now perform the manual DDoS Simulation (hping3) from VM1."
 echo "[*] Monitoring CPU usage via pidstat in background..."
 echo "----------------------------------------------------------------"
 log_marker "SCENARIO 3 - MANUAL Phase: DDoS Simulation"
-take_pidstat_snapshot
 read -p "[PAUSE] Press [ENTER] when you are finished with the Manual Stress Test to stop and clean up..."
 echo "----------------------------------------------------------------"
 
