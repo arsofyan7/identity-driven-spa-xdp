@@ -10,6 +10,7 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 * **Tools:** `cargo` (Rust toolchain), `hping3`.
 * **Network:** Static IP assigned and reachable by VM2.
 * **Clock Sync:** Ensure time is synchronized with VM2 to maintain log integrity.
+* **Access:** Ensure VM2 can SSH into VM1 without a password prompt.
 
 ### 2.2 Virtual Machine 2 (Receiver/Gateway)
 * **Tools:** `python3`, `iptables`, `sysstat` (for `pidstat`), `tcpdump`.
@@ -29,33 +30,29 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
    ```
 2. **On VM1 (Generator):** Send a single authorized SPA packet.
    ```bash
-   cargo run --bin generator -- run --phase 0 --target <VM2_IP> --secret "your-shared-secret"
+   cargo run --bin vm1_generator -- --target <VM2_IP> --identity <id-number> --secret "your-shared-secret"
    ```
 3. **Verification:** Inspect the Iptables chain on VM2.
    ```bash
    sudo iptables -L -n
    ```
    **Expected Result:** A new `ACCEPT` rule for VM1's source IP should be visible in the `INPUT` chain.
-
 ---
 
-### Scenario 2: Baseline Performance Benchmarking
-*Measure the authorization latency and CPU overhead under sequential load.*
+### Scenario 2: Automated Load Benchmarking
+*Measure the authorization latency and system stability under Low Load, Sustained Load, and Stress Test scenarios.*
 
-1. **On VM2 (Receiver):** Execute the automated benchmarking suite.
+1. **On VM2 (Receiver):** Execute the automated benchmarking suite, providing VM1's IP and User. The script will automatically trigger the generator via SSH.
    ```bash
    chmod +x benchmarking/suites/run_p0_stress.sh
-   sudo ./benchmarking/suites/run_p0_stress.sh
+   sudo ./benchmarking/suites/run_p0_stress.sh <VM1_IP> <VM1_USER>
    ```
-2. **On VM1 (Generator):** When the script on VM2 displays "ACTION REQUIRED", trigger a batch of authorization requests.
-   ```bash
-   # Example: Sending 500 authorization packets to measure consistency
-   for i in {1..500}; do 
-     cargo run --bin generator -- run --phase 0 --target <VM2_IP> --secret "your-shared-secret"
-   done
-   ```
-3. **On VM2:** Press **[ENTER]** once the generator on VM1 finishes to terminate logging and cleanup background processes.
-
+2. **Observation:** The script runs 3 sequences automatically:
+   - Sequence 1: 100 packets @ 1 PPS (Cold-start latency)
+   - Sequence 2: 1000 packets @ 50 PPS (Sustained load)
+   - Sequence 3: 5000 packets @ Max Rate (Stress test)
+   
+3. **Completion:** The script will automatically terminate background processes and save the logs once the sequences finish.
 ---
 
 ### Scenario 3: Resilience & Stress Test (DDoS Simulation)
@@ -74,13 +71,14 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 ## 4. Data Collection & Analysis
 Benchmark outputs are stored in `results/raw_logs/`.
 
+* **`phase0_receiver_log.csv`**: Structured log of payload validation and latency (TIMESTAMP, SRC_IP, ID, LATENCY_US).
 * **`p0_baseline.log`**: Combined application logs and `pidstat` resource utilization data.
 * **`p0_packets.pcap`**: Raw network traffic captured via `tcpdump` for precise packet arrival analysis.
 
 ### Quick Latency Analysis
-To calculate the average processing latency (in microseconds) from the logs:
+To calculate the average processing latency (in microseconds) directly from the CSV:
 ```bash
-grep "Latency" results/raw_logs/p0_baseline.log | awk '{sum+=$4; count++} END {if (count > 0) print "Average Latency:", sum/count, "us"; else print "No data found."}'
+awk -F',' 'NR>1 {sum+=$4; count++} END {if (count > 0) print "Average Latency:", sum/count, "us"; else print "No data found."}' results/raw_logs/phase0_receiver_log.csv
 ```
 
 ---

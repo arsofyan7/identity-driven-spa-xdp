@@ -9,6 +9,7 @@ import time
 import subprocess
 import threading
 import argparse
+import os
 
 def remove_iptables_rule(src_ip):
     # This line executes a sleep before removing the rule
@@ -20,7 +21,7 @@ def remove_iptables_rule(src_ip):
     subprocess.run(["iptables", "-D", "INPUT", "-s", src_ip, "-j", "ACCEPT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     print(f"Removed iptables rule for {src_ip}")
 
-def verify_and_process(data, addr, secret_key):
+def verify_and_process(data, addr, secret_key, log_file=None):
     # This line records the start time
     # Rationale: Measure processing time from recv() to subprocess.run() completion in microseconds.
     start_time = time.perf_counter_ns()
@@ -57,6 +58,10 @@ def verify_and_process(data, addr, secret_key):
         
         print(f"Valid SPA from {src_ip} (ID: {identity_id}). Processing time: {processing_time_us:.2f} us")
         
+        if log_file:
+            with open(log_file, "a") as f:
+                f.write(f"{time.time()},{src_ip},{identity_id},{processing_time_us:.2f}\n")
+        
         # This line spawns a delayed background thread for cleanup
         # Rationale: Implements the "Cleanup Timer" without blocking the receiver loop.
         threading.Thread(target=remove_iptables_rule, args=(src_ip,), daemon=True).start()
@@ -71,7 +76,14 @@ def main():
     parser = argparse.ArgumentParser(description="VM2 Legacy Receiver Phase 0")
     parser.add_argument("--port", type=int, default=8080, help="UDP Port to listen on")
     parser.add_argument("--secret", type=str, required=True, help="Shared secret for HMAC")
+    parser.add_argument("--log-file", type=str, default="results/phase0_receiver_log.csv", help="Path to CSV log file")
     args = parser.parse_args()
+
+    # Initialize log file
+    if args.log_file and not os.path.exists(args.log_file):
+        os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+        with open(args.log_file, "w") as f:
+            f.write("TIMESTAMP,SRC_IP,ID,LATENCY_US\n")
 
     # This line opens a standard UDP socket
     # Rationale: UDP is standard for SPA since it is connectionless and easily filtered.
@@ -87,7 +99,7 @@ def main():
             # We expect 4 bytes for ID, 8 for timestamp, 32 for HMAC = 44 bytes total.
             data, addr = sock.recvfrom(1024)
             if len(data) == 44:
-                verify_and_process(data, addr, args.secret)
+                verify_and_process(data, addr, args.secret, args.log_file)
     except KeyboardInterrupt:
         print("\n[!] GhostPEP Receiver stopped by user.")
     finally:

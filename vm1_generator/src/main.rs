@@ -5,7 +5,7 @@ use clap::Parser;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::net::UdpSocket;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 // Import protocol module
 // Rationale: Keeps protocol definitions modular.
@@ -37,62 +37,95 @@ struct Args {
     // Rationale: Pre-shared key for authentication. In a full ZTA, this would be short-lived and dynamically rotated.
     #[arg(short, long)]
     secret: String,
+
+    // Total packets to send
+    #[arg(short, long, default_value_t = 1)]
+    count: u32,
+
+    // Target Packets Per Second (PPS). If 0, sprint max speed.
+    #[arg(short, long, default_value_t = 1)]
+    rate: u32,
+
+    // Inter-packet delay in milliseconds (alternative to rate)
+    #[arg(short = 'd', long)]
+    delay: Option<u64>,
 }
 
 fn main() {
     // Parse CLI arguments
-    // Rationale: Extract execution parameters provided by the benchmarking scripts.
     let args = Args::parse();
-
-    // Get current time as timestamp
-    // Rationale: Timestamp is embedded in the packet payload to prevent replay attacks window.
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_secs();
-
-    // Serialize identity and timestamp for HMAC computation
-    // Rationale: We only sign the payload data, not the signature field itself.
-    let payload = bincode::serialize(&(args.identity, timestamp)).unwrap();
-
-    // Initialize HMAC with the secret key
-    // Rationale: Standard mechanism for authenticating message origin and integrity.
-    let mut mac = HmacSha256::new_from_slice(args.secret.as_bytes())
-        .expect("HMAC can take key of any size");
     
-    // Update HMAC with the payload data
-    // Rationale: This cryptographically binds the identity and timestamp together.
-    mac.update(&payload);
+    // Open a UDP socket
+    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind socket");
+    let target_addr = format!("{}:{}", args.target, args.port);
 
-    // Finalize the signature and extract bytes
-    // Rationale: Convert the result into the fixed-size 32-byte array needed by the SPAPacket struct.
-    let result = mac.finalize();
-    let signature_bytes = result.into_bytes();
-    let mut hmac_signature = [0u8; 32];
-    hmac_signature.copy_from_slice(&signature_bytes);
-
-    // Construct the SPA packet
-    // Rationale: Creating the structured object before serialization ensures fields match exactly.
-    let packet = SPAPacket {
-        identity_id: args.identity,
-        timestamp,
-        hmac_signature,
+    // Determine interval
+    let interval = if let Some(d) = args.delay {
+        Some(Duration::from_millis(d))
+    } else if args.rate > 0 {
+        Some(Duration::from_micros(1_000_000 / args.rate as u64))
+    } else {
+        None // rate = 0 (max speed)
     };
 
-    // Serialize the full packet
-    // Rationale: Convert the struct into a binary format suitable for UDP transmission. bincode is chosen for minimal overhead.
-    let serialized_packet = bincode::serialize(&packet).unwrap();
+    let start_time = Instant::now();
+    let mut next_packet = Instant::now();
+    if let Some(inv) = interval {
+        next_packet += inv;
+    }
 
-    // Open a UDP socket
-    // Rationale: UDP is used for SPA packets because it does not require an established connection (like TCP), enhancing stealth.
-    let socket = UdpSocket::bind("0.0.0.0:0").expect("Failed to bind socket");
+    let mut packets_sent = 0;
 
-    // Send the serialized packet to the target gatekeeper
-    // Rationale: Fire-and-forget mechanism is critical for stealth. The port is typically closed/stealthy on the receiver via firewall.
-    let target_addr = format!("{}:{}", args.target, args.port);
-    socket.send_to(&serialized_packet, target_addr).expect("Failed to send packet");
+    for _ in 0..args.count {
+        // Get current time as timestamp
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_secs();
 
-    // Output confirmation
-    // Rationale: Useful for verification during Phase 0 baseline testing.
-    println!("Sent SPA packet to {} for ID {} at TS {}", args.target, args.identity, timestamp);
+        // Serialize identity and timestamp for HMAC computation
+        let payload = bincode::serialize(&(args.identity, timestamp)).unwrap();
+
+        // Initialize HMAC with the secret key
+        let mut mac = HmacSha256::new_from_slice(args.secret.as_bytes())
+            .expect("HMAC can take key of any size");
+        mac.update(&payload);
+
+        let result = mac.finalize();
+        let signature_bytes = result.into_bytes();
+        let mut hmac_signature = [0u8; 32];
+        hmac_signature.copy_from_slice(&signature_bytes);
+
+        // Construct the SPA packet
+        let packet = SPAPacket {
+            identity_id: args.identity,
+            timestamp,
+            hmac_signature,
+        };
+
+        // Serialize and send
+        let serialized_packet = bincode::serialize(&packet).unwrap();
+        socket.send_to(&serialized_packet, &target_addr).expect("Failed to send packet");
+        packets_sent += 1;
+
+        if let Some(inv) = interval {
+            // Tunggu sampai target waktu tercapai (Busy-wait untuk presisi tinggi)
+            while Instant::now() < next_packet {
+                std::hint::spin_loop();
+            }
+            next_packet += inv;
+        }
+    }
+
+    let elapsed = start_time.elapsed();
+    let duration_ms = elapsed.as_millis();
+    let actual_pps = if duration_ms > 0 {
+        (packets_sent as u128 * 1000) / duration_ms
+    } else {
+        if packets_sent > 0 { packets_sent as u128 } else { 0 }
+    };
+
+    println!("Total packets sent: {}", packets_sent);
+    println!("Total duration (ms): {}", duration_ms);
+    println!("Actual average PPS: {}", actual_pps);
 }

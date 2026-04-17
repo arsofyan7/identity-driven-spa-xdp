@@ -1,0 +1,1 @@
+/mnt/d/Coding/identity-driven-spa-xdp/vm1_generator/target/debug/vm1_generator: /mnt/d/Coding/identity-driven-spa-xdp/vm1_generator/src/main.rs /mnt/d/Coding/identity-driven-spa-xdp/vm1_generator/src/protocol/mod.rs

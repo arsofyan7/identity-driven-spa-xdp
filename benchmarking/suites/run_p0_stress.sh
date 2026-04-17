@@ -7,6 +7,8 @@
 # ==============================================================================
 
 # --- 1. Konfigurasi & Variabel ---
+VM1_IP=${1:-"192.168.1.10"} # IP VM1 (Generator), override via arg $1
+VM1_USER=${2:-"root"}       # User VM1, override via arg $2
 IFACE="eth0" # Sesuaikan dengan interface VM2 lu
 TARGET_PORT=1234
 RECEIVER_PATH="vm2_receiver/phase0_legacy/receiver.py"
@@ -50,7 +52,7 @@ iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT
 
 # --- 4. Process Management ---
 echo "[*] Launching Legacy Receiver in background..."
-python3 "$RECEIVER_PATH" > "$TEMP_APP_LOG" 2>&1 &
+python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$LOG_DIR/phase0_receiver_log.csv" > "$TEMP_APP_LOG" 2>&1 &
 RECEIVER_PID=$!
 
 # Beri waktu listener untuk binding socket
@@ -75,12 +77,28 @@ TCPDUMP_PID=$!
 
 # --- 6. Test Execution Trigger ---
 echo "----------------------------------------------------------------"
-echo ">>> ACTION REQUIRED <<<"
-echo "Silahkan jalankan vm1_generator sekarang di VM1."
-echo "Contoh: cargo run --bin generator -- run --phase 0 --target $(hostname -I | awk '{print $1}') --secret 'my-secret'"
-echo "----------------------------------------------------------------"
+echo "[*] Triggering VM1 Generator automatically via SSH..."
 
-read -p "[?] Tekan [ENTER] jika pengiriman paket dari VM1 sudah selesai..." -n 1 -r
+VM2_IP=$(hostname -I | awk '{print $1}')
+GENERATOR_CMD="cd identity-driven-spa-xdp/vm1_generator && cargo run --release -- --target $VM2_IP --port $TARGET_PORT --identity 1001 --secret 'my-secret'"
+
+echo "### START_SEQUENCE_1 ###" >> "$RAW_LOG"
+echo "[*] Running Sequence 1 (Low Load: 100 packets @ 1 PPS)..."
+ssh -o BatchMode=yes $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 100 --rate 1"
+
+sleep 2
+
+echo "### START_SEQUENCE_2 ###" >> "$RAW_LOG"
+echo "[*] Running Sequence 2 (Sustained Load: 1000 packets @ 50 PPS)..."
+ssh -o BatchMode=yes $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
+
+sleep 2
+
+echo "### START_SEQUENCE_3 ###" >> "$RAW_LOG"
+echo "[*] Running Sequence 3 (Stress Test: 5000 packets @ Max Rate)..."
+ssh -o BatchMode=yes $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
+
+echo "----------------------------------------------------------------"
 
 # --- 7. Cleanup & Logging ---
 echo -e "\n[*] Cleaning up processes..."
