@@ -47,6 +47,7 @@ LOG_DIR="results/raw_logs"
 RAW_LOG="$LOG_DIR/p0_baseline.log"
 CPU_LOG="$LOG_DIR/p0_cpu_usage.log"
 TEMP_APP_LOG="p0_app_temp.log"
+SYSTEM_METRICS_LOG="$LOG_DIR/p0_system_wide.csv"
 
 # Pastikan folder log tersedia
 mkdir -p "$LOG_DIR"
@@ -56,11 +57,13 @@ mkdir -p "$LOG_DIR"
 > "$CPU_LOG"
 > "$TEMP_APP_LOG"
 echo "timestamp,src_ip,identity,latency_us" > "$LOG_DIR/p0_events.csv"
+echo "timestamp,cpu_usage_%,ram_avail_mb,rx_bytes_sec,tx_bytes_sec" > "$SYSTEM_METRICS_LOG"
 
 # Global PIDs
 RECEIVER_PID=""
 PIDSTAT_PID=""
 TCPDUMP_PID=""
+SYS_MONITOR_PID=""
 
 # --- 2. Robust Cleanup Trap ---
 # Rationale: Ensure processes are killed even if script fails or is aborted.
@@ -69,6 +72,7 @@ cleanup() {
     [[ -n "$RECEIVER_PID" ]] && kill $RECEIVER_PID 2>/dev/null
     [[ -n "$PIDSTAT_PID" ]] && kill $PIDSTAT_PID 2>/dev/null
     [[ -n "$TCPDUMP_PID" ]] && kill $TCPDUMP_PID 2>/dev/null
+    [[ -n "$SYS_MONITOR_PID" ]] && kill $SYS_MONITOR_PID 2>/dev/null
     iptables -F
     iptables -P INPUT ACCEPT
     echo "[+] Cleanup complete."
@@ -121,7 +125,58 @@ log_marker() {
     if [[ -f "$LOG_DIR/p0_events.csv" ]]; then
         echo "# [MARKER] $marker" >> "$LOG_DIR/p0_events.csv"
     fi
+    echo "# [MARKER] $marker" >> "$SYSTEM_METRICS_LOG"
 }
+
+# --- Background System Monitor ---
+monitor_system() {
+    local prev_idle=0 prev_total=0 prev_rx=0 prev_tx=0
+    if [[ -f /proc/stat ]]; then
+        read -r cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+        prev_total=$((user+nice+system+idle+iowait+irq+softirq+steal))
+        prev_idle=$idle
+    fi
+    local rx_tx rx tx
+    rx_tx=$(grep "$IFACE" /proc/net/dev 2>/dev/null | awk -F: '{print $2}' | awk '{print $1, $9}')
+    prev_rx=$(echo $rx_tx | awk '{print $1}')
+    prev_tx=$(echo $rx_tx | awk '{print $2}')
+    [[ -z "$prev_rx" ]] && prev_rx=0
+    [[ -z "$prev_tx" ]] && prev_tx=0
+
+    while true; do
+        sleep 1
+        now=$(date +"%T")
+        
+        # CPU Log
+        read -r cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+        total=$((user+nice+system+idle+iowait+irq+softirq+steal))
+        diff_idle=$((idle - prev_idle))
+        diff_total=$((total - prev_total))
+        cpu_usage=0
+        [[ $diff_total -gt 0 ]] && cpu_usage=$((100 * (diff_total - diff_idle) / diff_total))
+        prev_idle=$idle
+        prev_total=$total
+
+        # RAM Log
+        ram_free=$(free -m | awk 'NR==2{print $7}')
+
+        # Network Log
+        rx_tx=$(grep "$IFACE" /proc/net/dev 2>/dev/null | awk -F: '{print $2}' | awk '{print $1, $9}')
+        rx=$(echo $rx_tx | awk '{print $1}')
+        tx=$(echo $rx_tx | awk '{print $2}')
+        [[ -z "$rx" ]] && rx=0
+        [[ -z "$tx" ]] && tx=0
+        diff_rx=$((rx - prev_rx))
+        diff_tx=$((tx - prev_tx))
+        prev_rx=$rx
+        prev_tx=$tx
+
+        echo "$now,$cpu_usage,$ram_free,$diff_rx,$diff_tx" >> "$SYSTEM_METRICS_LOG"
+    done
+}
+echo "[*] Starting System Wide Monitoring (CPU, RAM, Net) continuously..."
+monitor_system &
+SYS_MONITOR_PID=$!
 
 # ==============================================================================
 # SCENARIO 1: NO FIREWALL
