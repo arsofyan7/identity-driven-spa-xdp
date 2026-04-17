@@ -14,19 +14,32 @@ import os
 def remove_iptables_rule(src_ip):
     # This line executes the command to remove the iptables rule
     # Rationale: Clean up the firewall rule to revoke access after the session timer expires.
-    subprocess.run(["iptables", "-D", "INPUT", "-s", src_ip, "-j", "ACCEPT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    print(f"[*] Removing iptables rule for {src_ip}...")
+    res = subprocess.run(["iptables", "-D", "INPUT", "-s", src_ip, "-j", "ACCEPT"], capture_output=True, text=True)
+    if res.returncode == 0:
+        print(f"[-] Successfully removed rule for {src_ip}")
+    else:
+        print(f"[!] Error removing rule: {res.stderr.strip()}")
 
 def verify_and_process(data, addr, secret_key, ttl, log_file=None):
+    src_ip = addr[0]
+    print(f"[DEBUG] Received {len(data)} bytes from {src_ip}")
+    
     # This line records the start time
     # Rationale: Measure processing time from recv() to subprocess.run() completion in microseconds.
     start_time = time.perf_counter_ns()
     
+    # We expect 4 bytes (ID) + 8 bytes (Timestamp) + 32 bytes (HMAC) = 44 bytes total.
+    if len(data) != 44:
+        print(f"[FAILED] Invalid packet length: {len(data)} (Expected 44)")
+        return
+
     # This line unpacks the binary payload assuming little-endian u32 (identity), u64 (timestamp), 32s (hmac)
     # Rationale: Interoperability with Rust's bincode serialization of primitives.
     try:
         identity_id, timestamp, signature = struct.unpack('<IQ32s', data)
-    except struct.error:
-        # Invalid packet format
+    except struct.error as e:
+        print(f"[FAILED] Struct unpack error: {e}")
         return
 
     # This line packs the identity and timestamp back to verify the HMAC
@@ -40,12 +53,17 @@ def verify_and_process(data, addr, secret_key, ttl, log_file=None):
     # This line securely compares the provided signature with the expected HMAC
     # Rationale: Use hmac.compare_digest to mitigate timing attacks during signature verification.
     if hmac.compare_digest(signature, expected_mac):
-        src_ip = addr[0]
+        print(f"[+] HMAC Valid for ID {identity_id}")
         
         # This line issues an iptables command to allow traffic from the source IP
         # Rationale: Grants network-level access, acting as the dynamic perimeter defined by SPA.
-        subprocess.run(["iptables", "-I", "INPUT", "-s", src_ip, "-j", "ACCEPT"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"[*] Executing iptables -I INPUT -s {src_ip} -j ACCEPT...")
+        res = subprocess.run(["iptables", "-I", "INPUT", "-s", src_ip, "-j", "ACCEPT"], capture_output=True, text=True)
         
+        if res.returncode != 0:
+            print(f"[!] iptables command FAILED: {res.stderr.strip()}")
+            return
+
         # This line records the end time after iptables execution
         # Rationale: Captures the full latency cost of userspace processing and shell execution (Phase 0 overhead).
         end_time = time.perf_counter_ns()
@@ -65,14 +83,20 @@ def verify_and_process(data, addr, secret_key, ttl, log_file=None):
         remove_iptables_rule(src_ip)
         print(f"[-] TTL Expired. Removing access for {src_ip}.")
     else:
+        print(f"[FAILED] Signature mismatch for ID {identity_id}. Remote signature: {signature.hex()[:8]}...")
         # This line drops invalid packets silently
         # Rationale: The essence of SPA is stealth; we do not respond to unauthorized access attempts.
         pass
 
 def main():
+    # Root Check
+    if os.name != 'nt' and os.geteuid() != 0:
+        print("[!] WARNING: This script must be run as root to manage iptables rules.")
+        print("[*] Try: sudo python3 receiver.py ...")
+
     # This line parses command-line arguments
     # Rationale: Allows dynamic configuration of the listening port and secret key for testing across different environments.
-    parser = argparse.ArgumentParser(description="VM2 Legacy Receiver Phase 0")
+    parser = argparse.ArgumentParser(description="VM2 Legacy Receiver Phase 0 (DEBUG VERSION)")
     parser.add_argument("--port", type=int, default=8080, help="UDP Port to listen on")
     parser.add_argument("--secret", type=str, required=True, help="Shared secret for HMAC")
     parser.add_argument("--log-file", type=str, default="results/raw_logs/p0_events.csv", help="Path to CSV log file")
@@ -100,13 +124,13 @@ def main():
         while True:
             # We expect 4 bytes for ID, 8 for timestamp, 32 for HMAC = 44 bytes total.
             data, addr = sock.recvfrom(1024)
-            if len(data) == 44:
-                verify_and_process(data, addr, args.secret, args.ttl, args.log_file)
+            verify_and_process(data, addr, args.secret, args.ttl, args.log_file)
     except KeyboardInterrupt:
         print("\n[!] GhostPEP Receiver stopped by user.")
     finally:
         print("[*] Cleaning up resources and closing socket...")
         sock.close()
+
 
         # Opsional: tambahin fungsi buat flush iptables di sini biar bener-bener bersih
 
