@@ -51,6 +51,12 @@ TEMP_APP_LOG="p0_app_temp.log"
 # Pastikan folder log tersedia
 mkdir -p "$LOG_DIR"
 
+# Reset logs for fresh run
+> "$RAW_LOG"
+> "$CPU_LOG"
+> "$TEMP_APP_LOG"
+echo "timestamp,src_ip,identity,latency_us" > "$LOG_DIR/p0_events.csv"
+
 # Global PIDs
 RECEIVER_PID=""
 PIDSTAT_PID=""
@@ -104,13 +110,26 @@ stop_tcpdump() {
     fi
 }
 
+log_marker() {
+    local marker="$1"
+    echo -e "\n==========================================================" >> "$RAW_LOG"
+    echo "[MARKER] $marker" >> "$RAW_LOG"
+    echo "==========================================================" >> "$CPU_LOG"
+    echo "[MARKER] $marker" >> "$CPU_LOG"
+    echo "==========================================================" >> "$TEMP_APP_LOG"
+    echo "[MARKER] $marker" >> "$TEMP_APP_LOG"
+    if [[ -f "$LOG_DIR/p0_events.csv" ]]; then
+        echo "# [MARKER] $marker" >> "$LOG_DIR/p0_events.csv"
+    fi
+}
+
 # ==============================================================================
 # SCENARIO 1: NO FIREWALL
 # Rationale: Baseline unrestricted baseline networking performance.
 # ==============================================================================
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 1: No Firewall"
-echo "### START_SCENARIO_1 ###" >> "$RAW_LOG"
+log_marker "START_SCENARIO_1: No Firewall"
 
 # Clean iptables, accept all
 iptables -F
@@ -129,7 +148,7 @@ sleep 2
 # ==============================================================================
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 2: Static Firewall (Drop All)"
-echo "### START_SCENARIO_2 ###" >> "$RAW_LOG"
+log_marker "START_SCENARIO_2: Static Firewall (Drop All)"
 
 # Set strict drop
 iptables -F
@@ -151,35 +170,38 @@ sleep 2
 # ==============================================================================
 echo "----------------------------------------------------------------"
 echo "[*] SCENARIO 3: Phase 0 SPA (Legacy Userspace)"
-echo "### START_SCENARIO_3 ###" >> "$RAW_LOG"
+log_marker "START_SCENARIO_3: Phase 0 SPA (Legacy Userspace)"
 
 # Allow SPA port manually
 iptables -A INPUT -p udp --dport $TARGET_PORT -j ACCEPT
 
 # Start Legacy Receiver
 echo "[*] Launching Legacy Receiver in background..."
-python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$LOG_DIR/p0_events.csv" > "$TEMP_APP_LOG" 2>&1 &
+python3 "$RECEIVER_PATH" --port $TARGET_PORT --secret "my-secret" --log-file "$LOG_DIR/p0_events.csv" >> "$TEMP_APP_LOG" 2>&1 &
 RECEIVER_PID=$!
 sleep 2
 
 if [[ -n "$RECEIVER_PID" ]]; then
-    pidstat -p $RECEIVER_PID -u -r 1 > "$CPU_LOG" &
+    pidstat -p $RECEIVER_PID -u -r 1 >> "$CPU_LOG" &
     PIDSTAT_PID=$!
 fi
 
 echo "[*] Running Sequence 1 (Low Load: 100 packets @ 1 PPS)..."
+log_marker "SCENARIO 3 - SEQUENCE 1: Low Load (1 PPS)"
 start_tcpdump "p0_sc3_spa_low.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 100 --rate 1"
 stop_tcpdump
 sleep 2
 
 echo "[*] Running Sequence 2 (Sustained Load: 1000 packets @ 50 PPS)..."
+log_marker "SCENARIO 3 - SEQUENCE 2: Sustained Load (50 PPS)"
 start_tcpdump "p0_sc3_spa_sustained.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 1000 --rate 50"
 stop_tcpdump
 sleep 2
 
 echo "[*] Running Sequence 3 (Stress Test: 5000 packets @ Max Rate)..."
+log_marker "SCENARIO 3 - SEQUENCE 3: Stress Test (Max Rate)"
 start_tcpdump "p0_sc3_spa_stress.pcap"
 ssh $SSH_OPTS $VM1_USER@$VM1_IP "$GENERATOR_CMD --count 5000 --rate 0"
 stop_tcpdump
@@ -190,6 +212,7 @@ echo "[*] The SPA Receiver is still running (PID: $RECEIVER_PID)."
 echo "[*] You can now perform the manual DDoS Simulation (hping3) from VM1."
 echo "[*] Monitoring CPU usage via pidstat in background..."
 echo "----------------------------------------------------------------"
+log_marker "SCENARIO 3 - MANUAL Phase: DDoS Simulation"
 read -p "[PAUSE] Press [ENTER] when you are finished with the Manual Stress Test to stop and clean up..."
 echo "----------------------------------------------------------------"
 
