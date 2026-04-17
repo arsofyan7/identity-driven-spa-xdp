@@ -26,7 +26,8 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 
 1. **On VM2 (Receiver):** Start the legacy receiver manually.
    ```bash
-   sudo python3 vm2_receiver/phase0_legacy/receiver.py --secret "your-shared-secret" --ttl <xx in sec>
+   # The --ttl (default 10) defines how many seconds the "door" stays open.
+   sudo python3 vm2_receiver/phase0_legacy/receiver.py --secret "your-shared-secret" --ttl 15
    ```
 2. **On VM1 (Generator):** Send a single authorized SPA packet.
    ```bash
@@ -42,11 +43,15 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 ### Scenario 2: Multi-Scenario Automated Benchmarking
 *Measure the authorization latency, baseline hardware throughput, and system stability under 3 distinct networking firewall scenarios (No Firewall, Static Drop, SPA).*
 
-1. **On VM2 (Receiver):** Execute the automated benchmarking suite, providing VM1's IP and User. The script will automatically trigger the generator via SSH.
+1. **On VM2 (Receiver):** Execute the automated benchmarking suite. The script automatically detects your SSH key if running via `sudo`, but you can provide it explicitly as the 3rd argument.
    ```bash
    chmod +x benchmarking/suites/run_p0_stress.sh
-   sudo ./benchmarking/suites/run_p0_stress.sh <VM1_IP> <VM1_USER>
+   sudo ./benchmarking/suites/run_p0_stress.sh <VM1_IP> <VM1_USER> [OPTIONAL_SSH_KEY_PATH]
    ```
+
+   > [!TIP]
+   > If you encounter "Permission Denied (publickey)", ensure your SSH key is authorized on VM1 and that you've passed the correct path (e.g., `/home/user/.ssh/id_ed25519`).
+
 2. **Observation:** The script runs 3 major scenarios and their respective sequences automatically:
    - **Scenario 1:** No Firewall (1000 packets)
    - **Scenario 2:** Static Firewall Drop (1000 packets)
@@ -71,7 +76,7 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 ## 4. Data Collection & Analysis
 Benchmark outputs are stored in `results/raw_logs/`.
 
-* **`phase0_receiver_log.csv`**: Structured log of payload validation and latency (`timestamp,src_ip,identity,latency_us`).
+* **`p0_events.csv`**: Structured log of payload validation and latency (`timestamp,src_ip,identity,latency_us`).
 * **`p0_baseline.log`**: Combined application logs and CPU/RAM `pidstat` utilization data.
 * **Separated Traffic Captures**: Raw network traffic captured via `tcpdump` sorted explicitly by scenario:
   * `p0_sc1_no_firewall.pcap`
@@ -83,7 +88,7 @@ Benchmark outputs are stored in `results/raw_logs/`.
 ### Quick Latency Analysis
 To calculate the average processing latency (in microseconds) directly from the CSV:
 ```bash
-awk -F',' 'NR>1 {sum+=$4; count++} END {if (count > 0) print "Average Latency:", sum/count, "us"; else print "No data found."}' results/raw_logs/phase0_receiver_log.csv
+awk -F',' 'NR>1 {sum+=$4; count++} END {if (count > 0) print "Average Latency:", sum/count, "us"; else print "No data found."}' results/raw_logs/p0_events.csv
 ```
 
 ---
