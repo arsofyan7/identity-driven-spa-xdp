@@ -39,20 +39,20 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
    **Expected Result:** A new `ACCEPT` rule for VM1's source IP should be visible in the `INPUT` chain.
 ---
 
-### Scenario 2: Automated Load Benchmarking
-*Measure the authorization latency and system stability under Low Load, Sustained Load, and Stress Test scenarios.*
+### Scenario 2: Multi-Scenario Automated Benchmarking
+*Measure the authorization latency, baseline hardware throughput, and system stability under 3 distinct networking firewall scenarios (No Firewall, Static Drop, SPA).*
 
 1. **On VM2 (Receiver):** Execute the automated benchmarking suite, providing VM1's IP and User. The script will automatically trigger the generator via SSH.
    ```bash
    chmod +x benchmarking/suites/run_p0_stress.sh
    sudo ./benchmarking/suites/run_p0_stress.sh <VM1_IP> <VM1_USER>
    ```
-2. **Observation:** The script runs 3 sequences automatically:
-   - Sequence 1: 100 packets @ 1 PPS (Cold-start latency)
-   - Sequence 2: 1000 packets @ 50 PPS (Sustained load)
-   - Sequence 3: 5000 packets @ Max Rate (Stress test)
+2. **Observation:** The script runs 3 major scenarios and their respective sequences automatically:
+   - **Scenario 1:** No Firewall (1000 packets)
+   - **Scenario 2:** Static Firewall Drop (1000 packets)
+   - **Scenario 3:** Phase 0 SPA Legacy (100 @ 1 PPS, 1000 @ 50 PPS, 5000 @ Max Rate)
    
-3. **Completion:** The script will automatically terminate background processes and save the logs once the sequences finish.
+3. **Completion:** The script will automatically separate the PCAP captures for each sequence, terminate background processes, and consolidate the execution logs upon completion.
 ---
 
 ### Scenario 3: Resilience & Stress Test (DDoS Simulation)
@@ -71,9 +71,14 @@ Ensure both Virtual Machines (VMs) are configured and can communicate over the i
 ## 4. Data Collection & Analysis
 Benchmark outputs are stored in `results/raw_logs/`.
 
-* **`phase0_receiver_log.csv`**: Structured log of payload validation and latency (TIMESTAMP, SRC_IP, ID, LATENCY_US).
-* **`p0_baseline.log`**: Combined application logs and `pidstat` resource utilization data.
-* **`p0_packets.pcap`**: Raw network traffic captured via `tcpdump` for precise packet arrival analysis.
+* **`phase0_receiver_log.csv`**: Structured log of payload validation and latency (`timestamp,src_ip,identity,latency_us`).
+* **`p0_baseline.log`**: Combined application logs and CPU/RAM `pidstat` utilization data.
+* **Separated Traffic Captures**: Raw network traffic captured via `tcpdump` sorted explicitly by scenario:
+  * `p0_sc1_no_firewall.pcap`
+  * `p0_sc2_static_drop.pcap`
+  * `p0_sc3_spa_low.pcap`
+  * `p0_sc3_spa_sustained.pcap`
+  * `p0_sc3_spa_stress.pcap`
 
 ### Quick Latency Analysis
 To calculate the average processing latency (in microseconds) directly from the CSV:

@@ -76,14 +76,16 @@ def main():
     parser = argparse.ArgumentParser(description="VM2 Legacy Receiver Phase 0")
     parser.add_argument("--port", type=int, default=8080, help="UDP Port to listen on")
     parser.add_argument("--secret", type=str, required=True, help="Shared secret for HMAC")
-    parser.add_argument("--log-file", type=str, default="results/phase0_receiver_log.csv", help="Path to CSV log file")
+    parser.add_argument("--log-file", type=str, default="results/raw_logs/p0_events.csv", help="Path to CSV log file")
     args = parser.parse_args()
 
     # Initialize log file
     if args.log_file and not os.path.exists(args.log_file):
         os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
         with open(args.log_file, "w") as f:
-            f.write("TIMESTAMP,SRC_IP,ID,LATENCY_US\n")
+            # This line writes the header to the CSV file
+            # Rationale: Structured logging for easy parsing in Pandas.
+            f.write("timestamp,src_ip,identity,latency_us\n")
 
     # This line opens a standard UDP socket
     # Rationale: UDP is standard for SPA since it is connectionless and easily filtered.

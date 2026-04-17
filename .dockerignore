@@ -1,0 +1,17 @@
+.git
+.agents
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Rust/Cargo
+vm1_generator/target/
+**/*.rs.bk
+
+# Logs/Results
+results/raw_logs/
+*.log
+*.pcap
+*.csv

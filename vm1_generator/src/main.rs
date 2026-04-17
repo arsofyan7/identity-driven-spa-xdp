@@ -125,7 +125,9 @@ fn main() {
         if packets_sent > 0 { packets_sent as u128 } else { 0 }
     };
 
-    println!("Total packets sent: {}", packets_sent);
-    println!("Total duration (ms): {}", duration_ms);
-    println!("Actual average PPS: {}", actual_pps);
+    // This line outputs summary statistics
+    // Rationale: Required for automated metrics parsing in Bash Orchestrator.
+    println!("SENT_COUNT: {}", packets_sent);
+    println!("DURATION_MS: {}", duration_ms);
+    println!("ACTUAL_PPS: {}", actual_pps);
 }
